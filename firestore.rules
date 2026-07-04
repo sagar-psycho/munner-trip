@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMember() {
+      return isSignedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isMember() && myRole() == 'admin';
+    }
+
+    // Member profiles - anyone signed in and already a member can read the
+    // roster (needed for names/balances/chat). Only the admin can create or
+    // remove members. Nobody can edit their own role.
+    match /members/{uid} {
+      allow read: if isMember();
+      allow create: if isAdmin() || (isSignedIn() && request.auth.uid == uid && !exists(/databases/$(database)/documents/members/$(uid)));
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Expenses - any member can create. Individual expenses are auto-approved
+    // by the client and can't be escalated to group after creation. Only the
+    // admin can change status (approve/reject a pending group expense).
+    match /expenses/{expenseId} {
+      allow read: if isMember();
+      allow create: if isMember()
+        && request.resource.data.paidByUid == request.auth.uid
+        && (request.resource.data.type == 'individual' ? request.resource.data.status == 'approved' : request.resource.data.status == 'pending');
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow delete: if isAdmin();
+    }
+
+    // Planner - everyone can read, only admin can write.
+    match /planner/{itemId} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+    }
+
+    // Media metadata - all members can read and add. No edits; only the
+    // uploader or admin can delete their own entry.
+    match /media/{mediaId} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.uploadedByUid == request.auth.uid;
+      allow delete: if isAdmin() || (isMember() && resource.data.uploadedByUid == request.auth.uid);
+      allow update: if false;
+    }
+
+    // Chat - group thread readable/writable by any member. DM threads only
+    // by the two participants (thread id is their sorted uid pair).
+    match /chats/{threadId}/messages/{messageId} {
+      allow read: if isMember() && (threadId == 'group' || threadId.split('_').hasAny([request.auth.uid]));
+      allow create: if isMember()
+        && request.resource.data.senderUid == request.auth.uid
+        && (threadId == 'group' || threadId.split('_').hasAny([request.auth.uid]));
+      allow update, delete: if false;
+    }
+  }
+}

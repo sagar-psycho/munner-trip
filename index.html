@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Munnar Trip</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="screen-login" class="screen">
+    <div class="login-card">
+      <p class="eyebrow">Munnar · next month</p>
+      <h1>Trip log</h1>
+      <p class="sub">Only members added by the admin can sign in.</p>
+      <input id="login-email" type="email" placeholder="name@email.com" autocomplete="email" />
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
+      <button id="btn-login" class="btn-primary">Sign in</button>
+      <p id="login-error" class="error-text"></p>
+      <p class="hint">First time? Use the password the admin shared with you.</p>
+    </div>
+  </div>
+
+  <!-- APP SHELL -->
+  <div id="screen-app" class="screen" style="display:none;">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="eyebrow">Munnar</span>
+        <h2 id="header-title">Expenses</h2>
+      </div>
+      <div class="topbar-right">
+        <span id="user-name" class="user-chip"></span>
+        <button id="btn-logout" class="btn-ghost small">Sign out</button>
+      </div>
+    </header>
+
+    <main id="main-content"></main>
+
+    <nav class="tabbar">
+      <button class="tab-btn active" data-tab="expenses"><i class="ti ti-receipt"></i><span>Expenses</span></button>
+      <button class="tab-btn" data-tab="planner"><i class="ti ti-map-2"></i><span>Planner</span></button>
+      <button class="tab-btn" data-tab="media"><i class="ti ti-photo"></i><span>Media</span></button>
+      <button class="tab-btn" data-tab="chat"><i class="ti ti-message-circle"></i><span>Chat</span></button>
+      <button class="tab-btn" id="tab-admin" data-tab="admin" style="display:none;"><i class="ti ti-settings"></i><span>Admin</span></button>
+    </nav>
+  </div>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css">
+
+  <script type="module" src="firebase-config.js"></script>
+  <script type="module" src="auth.js"></script>
+  <script type="module" src="expenses.js"></script>
+  <script type="module" src="planner.js"></script>
+  <script type="module" src="media.js"></script>
+  <script type="module" src="chat.js"></script>
+  <script type="module" src="admin.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMember() {
+      return isSignedIn() && firestore.exists(/databases/(default)/documents/members/$(request.auth.uid));
+    }
+
+    // Trip media - any signed-in member can upload and read. Cap individual
+    // files at 200MB (covers phone videos) to avoid runaway storage use.
+    match /trip-media/{uid}/{fileName} {
+      allow read: if isMember();
+      allow write: if isMember() && request.auth.uid == uid && request.resource.size < 200 * 1024 * 1024;
+      allow delete: if isMember() && request.auth.uid == uid;
+    }
+  }
+}
