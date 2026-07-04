@@ -24,7 +24,7 @@ import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-
   };
 
 // The one and only admin for this trip.
-export const ADMIN_EMAIL = "kothakulasagar2002@gmail.com";
+export const ADMIN_EMAIL = "sathwikreddy9347@gmail.com";
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
