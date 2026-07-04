@@ -1,10 +1,13 @@
 // app.js
-import { login, logout, onAuthReady, isAdmin, currentProfile } from "./auth.js";
+import { login, logout, onAuthReady, isAdmin } from "./auth.js";
 import { renderExpensesTab, teardownExpensesTab } from "./expenses.js";
 import { renderPlannerTab, teardownPlannerTab } from "./planner.js";
 import { renderMediaTab, teardownMediaTab } from "./media.js";
 import { renderChatTab, teardownChatTab } from "./chat.js";
 import { renderAdminTab } from "./admin.js";
+import { renderNotificationCenter } from "./notification-center.js";
+import { renderSettlementTab, teardownSettlementTab } from "./settlements.js";
+import { requestBrowserNotificationPermission, NotificationService } from "./notification-service.js";
 
 const screenLogin = document.getElementById("screen-login");
 const screenApp = document.getElementById("screen-app");
@@ -18,10 +21,13 @@ const tabConfig = {
   planner: { title: "Planner", render: renderPlannerTab, teardown: teardownPlannerTab },
   media: { title: "Media", render: renderMediaTab, teardown: teardownMediaTab },
   chat: { title: "Chat", render: renderChatTab, teardown: teardownChatTab },
-  admin: { title: "Admin", render: renderAdminTab, teardown: () => {} }
+  admin: { title: "Admin", render: renderAdminTab, teardown: () => {} },
+  notifications: { title: "Notifications", render: (container) => renderNotificationCenter(container), teardown: () => {} },
+  settlements: { title: "Settlements", render: renderSettlementTab, teardown: teardownSettlementTab }
 };
 
 let activeTab = "expenses";
+let unreadSubscription = null;
 
 function teardownAll() {
   Object.values(tabConfig).forEach((t) => t.teardown && t.teardown());
@@ -34,6 +40,7 @@ function switchTab(tabName) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
+  window.location.hash = tabName;
   tabConfig[tabName].render(mainContent);
 }
 
@@ -55,7 +62,21 @@ document.getElementById("btn-login").addEventListener("click", async () => {
 
 document.getElementById("btn-logout").addEventListener("click", async () => {
   teardownAll();
+  if (unreadSubscription) unreadSubscription();
   await logout();
+});
+
+async function initializeNotifications() {
+  if ("Notification" in window) {
+    await requestBrowserNotificationPermission();
+  }
+}
+
+window.addEventListener("hashchange", () => {
+  const nextTab = window.location.hash.replace(/^#/, "");
+  if (tabConfig[nextTab]) {
+    switchTab(nextTab);
+  }
 });
 
 onAuthReady((user, profile, errorMessage) => {
@@ -72,5 +93,15 @@ onAuthReady((user, profile, errorMessage) => {
   screenApp.style.display = "block";
   userNameEl.textContent = profile.name;
   tabAdminBtn.style.display = isAdmin() ? "flex" : "none";
-  switchTab("expenses");
+  initializeNotifications();
+  if (unreadSubscription) unreadSubscription();
+  unreadSubscription = NotificationService.subscribeUnreadCount(user.uid, (count) => {
+    const badgeEl = document.getElementById("alerts-badge");
+    if (badgeEl) {
+      badgeEl.textContent = count > 0 ? count : "";
+      badgeEl.style.display = count > 0 ? "inline-flex" : "none";
+    }
+  });
+  const initialTab = window.location.hash.replace(/^#/, "") || "expenses";
+  switchTab(tabConfig[initialTab] ? initialTab : "expenses");
 });

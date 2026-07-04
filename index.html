@@ -42,6 +42,12 @@
       <button class="tab-btn" data-tab="planner"><i class="bi bi-map"></i><span>Planner</span></button>
       <button class="tab-btn" data-tab="media"><i class="bi bi-image"></i><span>Media</span></button>
       <button class="tab-btn" data-tab="chat"><i class="bi bi-chat-dots"></i><span>Chat</span></button>
+      <button class="tab-btn" data-tab="settlements"><i class="bi bi-cash-stack"></i><span>Settlements</span></button>
+      <button class="tab-btn" data-tab="notifications">
+        <i class="bi bi-bell"></i>
+        <span>Alerts</span>
+        <span id="alerts-badge" class="tab-badge" style="display:none;"></span>
+      </button>
       <button class="tab-btn" id="tab-admin" data-tab="admin" style="display:none;"><i class="bi bi-gear"></i><span>Admin</span></button>
     </nav>
   </div>
@@ -50,6 +56,9 @@
 
   <script type="module" src="firebase-config.js"></script>
   <script type="module" src="auth.js"></script>
+  <script type="module" src="notification-service.js"></script>
+  <script type="module" src="chat-service.js"></script>
+  <script type="module" src="settlements.js"></script>
   <script type="module" src="expenses.js"></script>
   <script type="module" src="planner.js"></script>
   <script type="module" src="media.js"></script>

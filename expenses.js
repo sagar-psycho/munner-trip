@@ -10,6 +10,8 @@
 
 import { db } from "./firebase-config.js";
 import { currentUser, currentProfile, isAdmin, isSuperAdmin } from "./auth.js";
+import { NotificationService, NOTIFICATION_TYPES } from "./notification-service.js";
+import { renderAvatar } from "./avatar.js";
 import {
   collection,
   addDoc,
@@ -121,7 +123,10 @@ function renderBalances() {
       const label = amt > 0 ? `gets back \u20b9${amt}` : amt < 0 ? `owes \u20b9${Math.abs(amt)}` : "settled up";
       return `
         <div class="row">
-          <span>${escapeHtml(m.name)}${m.uid === currentUser?.uid ? " (you)" : ""}</span>
+          <span style="display:flex; align-items:center; gap:8px;">
+            ${renderAvatar(m.name, { size: "small", className: "avatar-inline" })}
+            <span>${escapeHtml(m.name)}${m.uid === currentUser?.uid ? " (you)" : ""}</span>
+          </span>
           <span class="${cls}" style="font-weight:500; font-size:14px;">${label}</span>
         </div>
       `;
@@ -198,7 +203,32 @@ function renderPending() {
 }
 
 async function setStatus(expenseId, status) {
+  const expense = allExpenses.find((entry) => entry.id === expenseId);
   await updateDoc(doc(db, "expenses", expenseId), { status });
+
+  if (status === "approved") {
+    await NotificationService.send({
+      type: NOTIFICATION_TYPES.EXPENSE_APPROVED,
+      title: "Expense approved",
+      message: `Your expense has been approved.`,
+      senderId: currentUser?.uid,
+      senderName: currentProfile?.name || "Admin",
+      receiverIds: [expense?.paidByUid].filter(Boolean),
+      expenseId,
+      priority: "high"
+    });
+  } else if (status === "rejected") {
+    await NotificationService.send({
+      type: NOTIFICATION_TYPES.EXPENSE_REJECTED,
+      title: "Expense rejected",
+      message: `Your expense was rejected.`,
+      senderId: currentUser?.uid,
+      senderName: currentProfile?.name || "Admin",
+      receiverIds: [expense?.paidByUid].filter(Boolean),
+      expenseId,
+      priority: "high"
+    });
+  }
 }
 
 async function deleteExpense(expenseId) {
@@ -347,7 +377,17 @@ function openAddExpenseModal() {
     };
     if (type === "group") payload.splitAmong = splitAmong;
 
-    await addDoc(collection(db, "expenses"), payload);
+    const docRef = await addDoc(collection(db, "expenses"), payload);
+    await NotificationService.send({
+      type: NOTIFICATION_TYPES.EXPENSE_SUBMITTED,
+      title: "Expense submitted",
+      message: `${currentProfile?.name || "Someone"} submitted an expense for approval.`,
+      senderId: currentUser?.uid,
+      senderName: currentProfile?.name || "Member",
+      receiverIds: allMembers.map((member) => member.uid).filter((uid) => uid !== currentUser?.uid),
+      expenseId: docRef.id,
+      priority: "high"
+    });
     overlay.remove();
   });
 }

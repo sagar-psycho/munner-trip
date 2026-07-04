@@ -3,7 +3,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 /* ==========================================================
    Firebase Configuration
@@ -13,7 +12,6 @@ const firebaseConfig = {
   apiKey: "AIzaSyApun8uE_t1YH0q_6ldubRPqLubCPTFeF8",
   authDomain: "trip-sprit.firebaseapp.com",
   projectId: "trip-sprit",
-  storageBucket: "trip-sprit.firebasestorage.app",
   messagingSenderId: "495850037383",
   appId: "1:495850037383:web:11888e68e2231058efd822"
 };
@@ -25,7 +23,6 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const storage = getStorage(app);
 
 /* ==========================================================
    Super Admin
@@ -53,10 +50,16 @@ export const ROLES = {
 
 export const COLLECTIONS = {
   MEMBERS: "members",
+  USERS: "users",
   EXPENSES: "expenses",
   PLANNER: "planner",
   MEDIA: "media",
   CHATS: "chats",
+  CHAT_ROOMS: "chatRooms",
+  NOTIFICATIONS: "notifications",
+  NOTIFICATION_TOKENS: "notificationTokens",
+  SETTINGS: "settings",
+  PAYMENTS: "payments",
   ACTIVITY_LOGS: "activity_logs"
 };
 

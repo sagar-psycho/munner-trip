@@ -99,5 +99,68 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
       allow update: if false;
     }
+
+    // Notifications - only relevant receivers can read them, and only their
+    // own notification state can be changed.
+    match /notifications/{notificationId} {
+      allow read: if isMember() && request.auth.uid in resource.data.receiverIds;
+      allow create: if isMember()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.receiverIds is list
+        && request.resource.data.receiverIds.hasAny([request.auth.uid]) == false;
+      allow update: if isMember()
+        && request.auth.uid in resource.data.receiverIds
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt', 'userState'])
+        && request.resource.data.userState[request.auth.uid].diff(resource.data.userState[request.auth.uid]).affectedKeys().hasOnly(['isRead','isArchived','isDeleted','readAt','archivedAt','deletedAt']);
+      allow delete: if false;
+    }
+
+    // Chat rooms - authenticated members can access rooms they participate in.
+    match /chatRooms/{roomId} {
+      allow read: if isMember() && request.auth.uid in resource.data.participantIds;
+      allow create: if isMember();
+      allow update: if isMember() && request.auth.uid in resource.data.participantIds;
+      allow delete: if isSuperAdmin();
+    }
+
+    match /chatRooms/{roomId}/messages/{messageId} {
+      allow read: if isMember() && exists(/databases/$(database)/documents/chatRooms/$(roomId));
+      allow create: if isMember() && request.resource.data.senderUid == request.auth.uid;
+      allow update: if isMember() && request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participantIds;
+      allow delete: if isSuperAdmin();
+    }
+
+    // Payments - members can view and manage payments that involve them.
+    match /payments/{paymentId} {
+      allow read: if isMember()
+        && (
+          request.auth.uid == resource.data.debtorUid
+          || request.auth.uid == resource.data.creditorUid
+          || request.auth.uid == resource.data.recordedByUid
+          || isAdmin()
+        );
+      allow create: if isMember()
+        && request.resource.data.debtorUid is string
+        && request.resource.data.creditorUid is string
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.status is string;
+      allow update: if isMember()
+        && (
+          request.auth.uid == resource.data.debtorUid
+          || request.auth.uid == resource.data.creditorUid
+          || request.auth.uid == resource.data.recordedByUid
+          || isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    // Notification device tokens - users can manage only their own token.
+    match /notificationTokens/{tokenId} {
+      allow read: if isMember() && request.auth.uid == tokenId;
+      allow create: if isMember() && request.auth.uid == tokenId;
+      allow update: if isMember() && request.auth.uid == tokenId;
+      allow delete: if isMember() && request.auth.uid == tokenId;
+    }
   }
 }

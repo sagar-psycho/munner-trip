@@ -9,7 +9,9 @@
 // Each item also shows the date it was added to the itinerary.
 
 import { db } from "./firebase-config.js";
-import { isAdmin } from "./auth.js";
+import { isAdmin, isSuperAdmin, currentUser, currentProfile } from "./auth.js";
+import { NotificationService, NOTIFICATION_TYPES } from "./notification-service.js";
+import { renderAvatar } from "./avatar.js";
 import {
   collection,
   addDoc,
@@ -71,13 +73,16 @@ function render() {
       <div class="timeline-item">
         <div class="timeline-time">${escapeHtml(item.time)}</div>
         <div class="timeline-body" style="flex:1;">
-          <h4><i class="bi ${modeIcon[item.mode] || "bi-geo-alt"}" style="margin-right:6px; vertical-align:-2px;"></i>${escapeHtml(item.title)}</h4>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            ${renderAvatar(item.createdByName || currentProfile?.name || "Trip", { size: "small", className: "avatar-inline" })}
+            <h4 style="margin:0;"><i class="bi ${modeIcon[item.mode] || "bi-geo-alt"}" style="margin-right:6px; vertical-align:-2px;"></i>${escapeHtml(item.title)}</h4>
+          </div>
           <p>${escapeHtml(item.details)}</p>
           <div class="timeline-mode">${escapeHtml(item.mode)}</div>
           <div class="timeline-mode" style="margin-top:2px;">Added ${new Date(item.createdAt).toLocaleDateString()}</div>
         </div>
         ${
-          isAdmin()
+          isSuperAdmin()
             ? `
           <div style="display:flex; flex-direction:column; gap:6px; align-self:flex-start;">
             <button class="btn-ghost small" data-edit="${item.id}"><i class="bi bi-pencil"></i></button>
@@ -90,7 +95,7 @@ function render() {
     )
     .join("");
 
-  if (isAdmin()) {
+  if (isSuperAdmin()) {
     el.querySelectorAll("[data-del]").forEach((btn) =>
       btn.addEventListener("click", () => deleteDoc(doc(db, "planner", btn.dataset.del)))
     );
@@ -165,8 +170,24 @@ function openItemModal(existingItem) {
 
     if (isEdit) {
       await updateDoc(doc(db, "planner", existingItem.id), { mode, time, title, details });
+      await NotificationService.send({
+        type: NOTIFICATION_TYPES.PLANNER_UPDATED,
+        title: "Planner updated",
+        message: `${currentProfile?.name || "Someone"} updated the trip planner.`,
+        receiverIds: [],
+        tripId: null,
+        dedupeKey: `planner-updated:${existingItem.id}`
+      });
     } else {
       await addDoc(collection(db, "planner"), { mode, time, title, details, createdAt: Date.now() });
+      await NotificationService.send({
+        type: NOTIFICATION_TYPES.PLANNER_CREATED,
+        title: "Planner created",
+        message: `${currentProfile?.name || "Someone"} created a new planner item.`,
+        receiverIds: [],
+        tripId: null,
+        dedupeKey: `planner-created:${title}`
+      });
     }
     overlay.remove();
   });

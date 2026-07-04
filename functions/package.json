@@ -1,0 +1,9 @@
+{
+  "name": "munner-trip-functions",
+  "description": "Firebase Cloud Functions for Munner Trip notifications",
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^11.0.0",
+    "firebase-functions": "^4.6.0"
+  }
+}

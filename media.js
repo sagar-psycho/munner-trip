@@ -5,6 +5,7 @@
 
 import { db, CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "./firebase-config.js";
 import { currentUser, currentProfile, isSuperAdmin } from "./auth.js";
+import { NotificationService, NOTIFICATION_TYPES } from "./notification-service.js";
 import {
   collection,
   addDoc,
@@ -121,12 +122,24 @@ async function handleFiles(fileList) {
       }
       const data = await res.json();
 
-      await addDoc(collection(db, "media"), {
+      const mediaDoc = await addDoc(collection(db, "media"), {
         url: data.secure_url,
         fileType: file.type,
         uploadedByUid: currentUser.uid,
         uploadedByName: currentProfile.name,
         createdAt: Date.now()
+      });
+
+      const uploadType = file.type.startsWith("video") ? NOTIFICATION_TYPES.VIDEOS_UPLOADED : NOTIFICATION_TYPES.IMAGES_UPLOADED;
+      await NotificationService.send({
+        type: uploadType,
+        title: file.type.startsWith("video") ? "Video uploaded" : "Images uploaded",
+        message: `${currentProfile?.name || "Someone"} uploaded ${files.length} ${file.type.startsWith("video") ? "video" : "image"}${files.length > 1 ? "s" : ""}.`,
+        senderId: currentUser?.uid,
+        senderName: currentProfile?.name || "Member",
+        receiverIds: [],
+        mediaId: mediaDoc.id,
+        priority: "normal"
       });
     } catch (err) {
       statusEl.textContent = `Couldn't upload ${file.name}: ${err.message}`;

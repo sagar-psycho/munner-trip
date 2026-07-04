@@ -55,9 +55,12 @@ async function loadProfile(user) {
     // predates the three-role system (e.g. still says "admin"), correct it
     // on login instead of requiring a manual Firestore edit.
     if (user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && currentProfile.role !== "super_admin") {
-      await updateDoc(ref, { role: "super_admin" });
+      await updateDoc(ref, { role: "super_admin", updatedAt: Date.now(), updatedBy: user.uid });
       currentProfile = { ...currentProfile, role: "super_admin" };
     }
+
+    await updateDoc(ref, { lastLoginAt: Date.now(), updatedAt: Date.now() });
+    currentProfile = { ...currentProfile, lastLoginAt: Date.now() };
 
     return currentProfile;
   }
@@ -68,7 +71,8 @@ async function loadProfile(user) {
       name: "Sagar (Admin)",
       email: user.email,
       role: "super_admin",
-      addedAt: Date.now()
+      addedAt: Date.now(),
+      lastLoginAt: Date.now()
     };
     await setDoc(ref, profile);
     currentProfile = profile;
