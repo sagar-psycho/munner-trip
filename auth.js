@@ -6,7 +6,7 @@
 // This file just handles sign-in / sign-out and exposes the current user
 // and their profile doc (name, role) from Firestore.
 
-import { auth, db, ADMIN_EMAIL } from "./firebase-config.js";
+import { auth, db, ADMIN_EMAIL, isAdminRole, isSuperAdminRole } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
   signOut,
@@ -15,14 +15,23 @@ import {
 import {
   doc,
   getDoc,
-  setDoc
+  setDoc,
+  updateDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 export let currentUser = null;
 export let currentProfile = null; // { name, email, role: 'admin' | 'member' }
 
+// True for admin OR super_admin - can add members, approve expenses,
+// add planner items. Cannot delete anything.
 export function isAdmin() {
-  return currentProfile?.role === "admin";
+  return isAdminRole(currentProfile?.role);
+}
+
+// True only for super_admin - the only role that can delete anything
+// (planner items, media, chat messages, members, expenses).
+export function isSuperAdmin() {
+  return isSuperAdminRole(currentProfile?.role);
 }
 
 export async function login(email, password) {
@@ -41,6 +50,15 @@ async function loadProfile(user) {
 
   if (snap.exists()) {
     currentProfile = snap.data();
+
+    // Self-heal: if this is the super admin's email but their existing doc
+    // predates the three-role system (e.g. still says "admin"), correct it
+    // on login instead of requiring a manual Firestore edit.
+    if (user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && currentProfile.role !== "super_admin") {
+      await updateDoc(ref, { role: "super_admin" });
+      currentProfile = { ...currentProfile, role: "super_admin" };
+    }
+
     return currentProfile;
   }
 
@@ -49,7 +67,7 @@ async function loadProfile(user) {
     const profile = {
       name: "Sagar (Admin)",
       email: user.email,
-      role: "admin",
+      role: "super_admin",
       addedAt: Date.now()
     };
     await setDoc(ref, profile);

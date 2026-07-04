@@ -4,10 +4,12 @@
 // plan needed); only the resulting URL + metadata is saved to Firestore.
 
 import { db, CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "./firebase-config.js";
-import { currentUser, currentProfile } from "./auth.js";
+import { currentUser, currentProfile, isSuperAdmin } from "./auth.js";
 import {
   collection,
   addDoc,
+  deleteDoc,
+  doc,
   onSnapshot,
   query,
   orderBy
@@ -18,7 +20,7 @@ let unsubMedia = null;
 export function renderMediaTab(container) {
   container.innerHTML = `
     <div class="upload-drop" id="upload-drop">
-      <i class="ti ti-cloud-upload" style="font-size:26px;"></i>
+      <i class="bi bi-cloud-upload" style="font-size:26px;"></i>
       <p style="margin:8px 0 0; font-size:14px;">Tap to upload photos or videos</p>
       <input type="file" id="media-file-input" accept="image/*,video/*" multiple style="display:none;" />
     </div>
@@ -37,26 +39,59 @@ export function renderMediaTab(container) {
     const grid = document.getElementById("media-grid");
     if (!grid) return;
     if (snap.empty) {
-      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;"><i class="ti ti-photo"></i>No photos or videos yet.</div>`;
+      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;"><i class="bi bi-image"></i>No photos or videos yet.</div>`;
       return;
     }
     grid.innerHTML = snap.docs
       .map((d) => {
         const m = d.data();
-        const tag = m.fileType.startsWith("video") ? `<video src="${m.url}" muted></video>` : `<img src="${m.url}" loading="lazy" />`;
+        const isVideo = m.fileType.startsWith("video");
+        const tag = isVideo ? `<video src="${m.url}" muted></video>` : `<img src="${m.url}" loading="lazy" />`;
+        const downloadUrl = cloudinaryDownloadUrl(m.url, isVideo);
+        const deleteBtn = isSuperAdmin()
+          ? `<button class="media-action media-delete" data-delete-media="${d.id}" title="Delete"><i class="bi bi-trash"></i></button>`
+          : "";
         return `
-          <a class="media-tile" href="${m.url}" target="_blank" rel="noopener">
-            ${tag}
+          <div class="media-tile">
+            <a href="${m.url}" target="_blank" rel="noopener">
+              ${tag}
+            </a>
             <div class="media-by">${escapeHtml(m.uploadedByName)}</div>
-          </a>
+            <div class="media-actions">
+              <a class="media-action media-download" href="${downloadUrl}" download title="Download" target="_blank" rel="noopener"><i class="bi bi-download"></i></a>
+              ${deleteBtn}
+            </div>
+          </div>
         `;
       })
       .join("");
+
+    if (isSuperAdmin()) {
+      grid.querySelectorAll("[data-delete-media]").forEach((btn) =>
+        btn.addEventListener("click", () => handleDeleteMedia(btn.dataset.deleteMedia))
+      );
+    }
   });
 }
 
 export function teardownMediaTab() {
   if (unsubMedia) unsubMedia();
+}
+
+// Cloudinary serves files inline by default; appending fl_attachment forces
+// a real download instead of navigating to the file in-browser.
+function cloudinaryDownloadUrl(url, isVideo) {
+  const marker = isVideo ? "/video/upload/" : "/image/upload/";
+  if (url.includes(marker)) {
+    return url.replace(marker, marker + "fl_attachment/");
+  }
+  return url;
+}
+
+async function handleDeleteMedia(mediaId) {
+  const confirmed = confirm("Delete this photo/video from the gallery? This can't be undone (it only removes the entry here, not from Cloudinary).");
+  if (!confirmed) return;
+  await deleteDoc(doc(db, "media", mediaId));
 }
 
 async function handleFiles(fileList) {

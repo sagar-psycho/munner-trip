@@ -5,10 +5,12 @@
 //     thread id (sorted uid pair) so both sides land in the same doc.
 
 import { db } from "./firebase-config.js";
-import { currentUser, currentProfile } from "./auth.js";
+import { currentUser, currentProfile, isSuperAdmin } from "./auth.js";
 import {
   collection,
   addDoc,
+  deleteDoc,
+  doc,
   onSnapshot,
   query,
   orderBy,
@@ -41,7 +43,7 @@ function renderThreadList(container) {
 
   container.innerHTML = `
     <div class="chat-list-item" id="open-group-chat">
-      <div class="chat-avatar"><i class="ti ti-users"></i></div>
+      <div class="chat-avatar"><i class="bi bi-people"></i></div>
       <div>
         <div style="font-weight:500; font-size:14px;">Group chat</div>
         <div style="font-size:12px; color:var(--text-muted);">Everyone on the trip</div>
@@ -55,7 +57,7 @@ function renderThreadList(container) {
 
   const dmList = document.getElementById("dm-list");
   if (allMembers.length === 0) {
-    dmList.innerHTML = `<div class="empty-state"><i class="ti ti-message-circle"></i>No other members yet.</div>`;
+    dmList.innerHTML = `<div class="empty-state"><i class="bi bi-chat-dots"></i>No other members yet.</div>`;
     return;
   }
   allMembers.forEach((m) => {
@@ -78,12 +80,12 @@ function openThread(container, threadId, label) {
   currentThreadLabel = label;
 
   container.innerHTML = `
-    <button class="back-link" id="chat-back"><i class="ti ti-chevron-left"></i> ${escapeHtml(label)}</button>
+    <button class="back-link" id="chat-back"><i class="bi bi-chevron-left"></i> ${escapeHtml(label)}</button>
     <div class="chat-window">
       <div class="chat-messages" id="chat-messages"></div>
       <div class="chat-input-row">
         <input id="chat-input" type="text" placeholder="Message" />
-        <button class="btn-primary" id="chat-send"><i class="ti ti-send"></i></button>
+        <button class="btn-primary" id="chat-send"><i class="bi bi-send"></i></button>
       </div>
     </div>
   `;
@@ -117,16 +119,34 @@ function openThread(container, threadId, label) {
       .map((d) => {
         const m = d.data();
         const mine = m.senderUid === currentUser.uid;
+        const deleteBtn = isSuperAdmin()
+          ? `<button class="msg-delete" data-delete-msg="${d.id}" title="Delete message"><i class="bi bi-trash"></i></button>`
+          : "";
         return `
-          <div>
+          <div class="msg-row ${mine ? "msg-row-mine" : ""}">
             ${threadId === "group" && !mine ? `<div class="msg-sender">${escapeHtml(m.senderName)}</div>` : ""}
-            <div class="msg-bubble ${mine ? "msg-mine" : "msg-theirs"}">${escapeHtml(m.text)}</div>
+            <div class="msg-line">
+              <div class="msg-bubble ${mine ? "msg-mine" : "msg-theirs"}">${escapeHtml(m.text)}</div>
+              ${deleteBtn}
+            </div>
           </div>
         `;
       })
       .join("");
     msgsEl.scrollTop = msgsEl.scrollHeight;
+
+    if (isSuperAdmin()) {
+      msgsEl.querySelectorAll("[data-delete-msg]").forEach((btn) =>
+        btn.addEventListener("click", () => handleDeleteMessage(threadId, btn.dataset.deleteMsg))
+      );
+    }
   });
+}
+
+async function handleDeleteMessage(threadId, messageId) {
+  const confirmed = confirm("Delete this message? This can't be undone.");
+  if (!confirmed) return;
+  await deleteDoc(doc(db, "chats", threadId, "messages", messageId));
 }
 
 function initials(name) {

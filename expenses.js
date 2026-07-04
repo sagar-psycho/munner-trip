@@ -9,11 +9,12 @@
 //     and balances are computed live from all approved group expenses.
 
 import { db } from "./firebase-config.js";
-import { currentUser, currentProfile, isAdmin } from "./auth.js";
+import { currentUser, currentProfile, isAdmin, isSuperAdmin } from "./auth.js";
 import {
   collection,
   addDoc,
   updateDoc,
+  deleteDoc,
   doc,
   onSnapshot,
   query,
@@ -29,17 +30,17 @@ export function renderExpensesTab(container) {
   container.innerHTML = `
     <div class="section-title">Balances</div>
     <div class="card" id="balances-card">
-      <div class="empty-state"><i class="ti ti-scale"></i>Calculating...</div>
+      <div class="empty-state"><i class="bi bi-wallet2"></i>Calculating...</div>
     </div>
 
     <div class="section-title">Pending approval</div>
     <div class="card" id="pending-card">
-      <div class="empty-state"><i class="ti ti-clock"></i>Nothing pending.</div>
+      <div class="empty-state"><i class="bi bi-clock"></i>Nothing pending.</div>
     </div>
 
     <div class="section-title">All expenses</div>
     <div class="card" id="expenses-card">
-      <div class="empty-state"><i class="ti ti-receipt"></i>No expenses logged yet.</div>
+      <div class="empty-state"><i class="bi bi-receipt"></i>No expenses logged yet.</div>
     </div>
   `;
 
@@ -82,7 +83,7 @@ function renderBalances() {
   const el = document.getElementById("balances-card");
   if (!el) return;
   if (allMembers.length === 0) {
-    el.innerHTML = `<div class="empty-state"><i class="ti ti-scale"></i>No members yet.</div>`;
+    el.innerHTML = `<div class="empty-state"><i class="bi bi-wallet2"></i>No members yet.</div>`;
     return;
   }
 
@@ -109,7 +110,7 @@ function renderBalances() {
   });
 
   if (approvedGroup.length === 0) {
-    el.innerHTML = `<div class="empty-state"><i class="ti ti-scale"></i>No approved group expenses yet.</div>`;
+    el.innerHTML = `<div class="empty-state"><i class="bi bi-wallet2"></i>No approved group expenses yet.</div>`;
     return;
   }
 
@@ -136,7 +137,7 @@ function renderPending() {
   const pending = allExpenses.filter((e) => e.type === "group" && e.status === "pending");
 
   if (pending.length === 0) {
-    el.innerHTML = `<div class="empty-state"><i class="ti ti-clock"></i>Nothing pending.</div>`;
+    el.innerHTML = `<div class="empty-state"><i class="bi bi-clock"></i>Nothing pending.</div>`;
     return;
   }
 
@@ -151,12 +152,18 @@ function renderPending() {
         .join(", ");
       const perHead = Math.round(exp.amount / Math.max(participants.length, 1));
 
+      const deleteBtn = isSuperAdmin()
+        ? `<button class="btn-danger" data-delete="${exp.id}"><i class="bi bi-trash"></i></button>`
+        : "";
       const adminButtons = isAdmin()
         ? `
         <div style="display:flex; gap:8px; margin-top:10px;">
           <button class="btn-primary" style="padding:8px;" data-approve="${exp.id}">Approve</button>
           <button class="btn-danger" data-reject="${exp.id}">Reject</button>
+          ${deleteBtn}
         </div>`
+        : isSuperAdmin()
+        ? `<div style="display:flex; gap:8px; margin-top:10px;">${deleteBtn}</div>`
         : `<p class="hint" style="text-align:left; margin:8px 0 0;">Waiting on admin approval.</p>`;
 
       return `
@@ -183,10 +190,21 @@ function renderPending() {
       btn.addEventListener("click", () => setStatus(btn.dataset.reject, "rejected"))
     );
   }
+  if (isSuperAdmin()) {
+    el.querySelectorAll("[data-delete]").forEach((btn) =>
+      btn.addEventListener("click", () => deleteExpense(btn.dataset.delete))
+    );
+  }
 }
 
 async function setStatus(expenseId, status) {
   await updateDoc(doc(db, "expenses", expenseId), { status });
+}
+
+async function deleteExpense(expenseId) {
+  const confirmed = confirm("Delete this expense? This can't be undone.");
+  if (!confirmed) return;
+  await deleteDoc(doc(db, "expenses", expenseId));
 }
 
 // --- Full list --------------------------------------------------------
@@ -195,7 +213,7 @@ function renderExpenseList() {
   const el = document.getElementById("expenses-card");
   if (!el) return;
   if (allExpenses.length === 0) {
-    el.innerHTML = `<div class="empty-state"><i class="ti ti-receipt"></i>No expenses logged yet.</div>`;
+    el.innerHTML = `<div class="empty-state"><i class="bi bi-receipt"></i>No expenses logged yet.</div>`;
     return;
   }
 
@@ -207,6 +225,10 @@ function renderExpenseList() {
         exp.type === "group"
           ? `<span class="pill pill-${exp.status}">${exp.status}</span>`
           : "";
+      const deleteBtn = isSuperAdmin()
+        ? `<button class="btn-danger" data-list-delete="${exp.id}" style="margin-top:8px;"><i class="bi bi-trash"></i></button>`
+        : "";
+
       return `
         <div class="expense-item">
           <div class="row">
@@ -217,10 +239,17 @@ function renderExpenseList() {
             </div>
             <div class="expense-amount">\u20b9${exp.amount}</div>
           </div>
+          ${deleteBtn}
         </div>
       `;
     })
     .join("");
+
+  if (isSuperAdmin()) {
+    el.querySelectorAll("[data-list-delete]").forEach((btn) =>
+      btn.addEventListener("click", () => deleteExpense(btn.dataset.listDelete))
+    );
+  }
 }
 
 // --- Add expense modal --------------------------------------------------
@@ -230,7 +259,7 @@ function injectFab() {
   const fab = document.createElement("button");
   fab.id = "expense-fab";
   fab.className = "fab";
-  fab.innerHTML = `<i class="ti ti-plus"></i>`;
+  fab.innerHTML = `<i class="bi bi-plus-lg"></i>`;
   fab.addEventListener("click", openAddExpenseModal);
   document.body.appendChild(fab);
 }

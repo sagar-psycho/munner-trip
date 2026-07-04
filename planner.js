@@ -1,13 +1,19 @@
 // planner.js
-// Admin adds/edits/deletes itinerary items (pickup points, bus times,
-// train times, anything else). Members see the same list, sorted by time,
-// with no edit controls at all.
+// Admin and super admin can add, edit, and delete itinerary items (pickup
+// points, bus times, train times, anything else). Members see the same
+// list with no edit controls at all.
+//
+// Items are shown in the order they were added (first added = first shown),
+// not sorted by the free-text "time" field, since that's just a label the
+// admin types in (e.g. "6:30 AM", "Day 2") and isn't reliably sortable.
+// Each item also shows the date it was added to the itinerary.
 
 import { db } from "./firebase-config.js";
 import { isAdmin } from "./auth.js";
 import {
   collection,
   addDoc,
+  updateDoc,
   deleteDoc,
   doc,
   onSnapshot,
@@ -22,13 +28,15 @@ export function renderPlannerTab(container) {
   container.innerHTML = `
     <div class="section-title">Itinerary</div>
     <div class="card" id="planner-list">
-      <div class="empty-state"><i class="ti ti-map-2"></i>Loading…</div>
+      <div class="empty-state"><i class="bi bi-map"></i>Loading…</div>
     </div>
   `;
 
   if (isAdmin()) injectFab();
 
-  const q = query(collection(db, "planner"), orderBy("time", "asc"));
+  // Ordered by creation order - first added shows first, second added
+  // shows second, and so on.
+  const q = query(collection(db, "planner"), orderBy("createdAt", "asc"));
   unsubPlanner = onSnapshot(q, (snap) => {
     items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     render();
@@ -42,10 +50,10 @@ export function teardownPlannerTab() {
 }
 
 const modeIcon = {
-  pickup: "ti-car",
-  bus: "ti-bus",
-  train: "ti-train",
-  other: "ti-map-pin"
+  pickup: "bi-car-front",
+  bus: "bi-bus-front",
+  train: "bi-train-front",
+  other: "bi-geo-alt"
 };
 
 function render() {
@@ -53,7 +61,7 @@ function render() {
   if (!el) return;
 
   if (items.length === 0) {
-    el.innerHTML = `<div class="empty-state"><i class="ti ti-map-2"></i>The admin hasn't added the itinerary yet.</div>`;
+    el.innerHTML = `<div class="empty-state"><i class="bi bi-map"></i>The admin hasn't added the itinerary yet.</div>`;
     return;
   }
 
@@ -63,11 +71,20 @@ function render() {
       <div class="timeline-item">
         <div class="timeline-time">${escapeHtml(item.time)}</div>
         <div class="timeline-body" style="flex:1;">
-          <h4><i class="ti ${modeIcon[item.mode] || "ti-map-pin"}" style="margin-right:6px; vertical-align:-2px;"></i>${escapeHtml(item.title)}</h4>
+          <h4><i class="bi ${modeIcon[item.mode] || "bi-geo-alt"}" style="margin-right:6px; vertical-align:-2px;"></i>${escapeHtml(item.title)}</h4>
           <p>${escapeHtml(item.details)}</p>
           <div class="timeline-mode">${escapeHtml(item.mode)}</div>
+          <div class="timeline-mode" style="margin-top:2px;">Added ${new Date(item.createdAt).toLocaleDateString()}</div>
         </div>
-        ${isAdmin() ? `<button class="btn-danger" data-del="${item.id}" style="align-self:flex-start;"><i class="ti ti-trash"></i></button>` : ""}
+        ${
+          isAdmin()
+            ? `
+          <div style="display:flex; flex-direction:column; gap:6px; align-self:flex-start;">
+            <button class="btn-ghost small" data-edit="${item.id}"><i class="bi bi-pencil"></i></button>
+            <button class="btn-danger" data-del="${item.id}"><i class="bi bi-trash"></i></button>
+          </div>`
+            : ""
+        }
       </div>
     `
     )
@@ -77,6 +94,12 @@ function render() {
     el.querySelectorAll("[data-del]").forEach((btn) =>
       btn.addEventListener("click", () => deleteDoc(doc(db, "planner", btn.dataset.del)))
     );
+    el.querySelectorAll("[data-edit]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const item = items.find((i) => i.id === btn.dataset.edit);
+        if (item) openItemModal(item);
+      })
+    );
   }
 }
 
@@ -85,17 +108,20 @@ function injectFab() {
   const fab = document.createElement("button");
   fab.id = "planner-fab";
   fab.className = "fab";
-  fab.innerHTML = `<i class="ti ti-plus"></i>`;
-  fab.addEventListener("click", openAddItemModal);
+  fab.innerHTML = `<i class="bi bi-plus-lg"></i>`;
+  fab.addEventListener("click", () => openItemModal(null));
   document.body.appendChild(fab);
 }
 
-function openAddItemModal() {
+// Shared modal for both adding a new item (existingItem = null) and
+// editing an existing one (existingItem = the item being edited).
+function openItemModal(existingItem) {
+  const isEdit = !!existingItem;
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `
     <div class="modal-sheet">
-      <h3>Add to itinerary</h3>
+      <h3>${isEdit ? "Edit itinerary item" : "Add to itinerary"}</h3>
       <select id="pl-mode">
         <option value="pickup">Pickup</option>
         <option value="bus">Bus</option>
@@ -108,11 +134,18 @@ function openAddItemModal() {
       <p id="pl-error" class="error-text"></p>
       <div class="modal-actions">
         <button class="btn-ghost" id="pl-cancel">Cancel</button>
-        <button class="btn-primary" id="pl-submit">Add</button>
+        <button class="btn-primary" id="pl-submit">${isEdit ? "Save" : "Add"}</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+
+  if (isEdit) {
+    overlay.querySelector("#pl-mode").value = existingItem.mode || "other";
+    overlay.querySelector("#pl-time").value = existingItem.time || "";
+    overlay.querySelector("#pl-title").value = existingItem.title || "";
+    overlay.querySelector("#pl-details").value = existingItem.details || "";
+  }
 
   overlay.querySelector("#pl-cancel").addEventListener("click", () => overlay.remove());
   overlay.addEventListener("click", (e) => {
@@ -130,7 +163,11 @@ function openAddItemModal() {
       return;
     }
 
-    await addDoc(collection(db, "planner"), { mode, time, title, details, createdAt: Date.now() });
+    if (isEdit) {
+      await updateDoc(doc(db, "planner", existingItem.id), { mode, time, title, details });
+    } else {
+      await addDoc(collection(db, "planner"), { mode, time, title, details, createdAt: Date.now() });
+    }
     overlay.remove();
   });
 }

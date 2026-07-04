@@ -14,23 +14,51 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/members/$(request.auth.uid)).data.role;
     }
 
+    // Hardcoded to match SUPER_ADMIN_EMAIL in firebase-config.js. Used only
+    // to let that one account self-heal its own role doc to super_admin if
+    // it was created before the three-role system existed (see auth.js).
+    // Update this if you ever change the super admin's email address.
+    function isSuperAdminEmail() {
+      return isSignedIn() && request.auth.token.email.lower() == 'kothakulasagar2002@gmail.com';
+    }
+
+    // admin OR super_admin - can add members, approve/reject expenses, add
+    // planner items. Cannot delete anything.
     function isAdmin() {
-      return isMember() && myRole() == 'admin';
+      return isMember() && (myRole() == 'admin' || myRole() == 'super_admin');
+    }
+
+    // Only super_admin can delete anything (members, expenses, planner
+    // items, media, chat messages) or promote a member to admin.
+    function isSuperAdmin() {
+      return isMember() && myRole() == 'super_admin';
     }
 
     // Member profiles - anyone signed in and already a member can read the
-    // roster (needed for names/balances/chat). Only the admin can create or
-    // remove members. Nobody can edit their own role.
+    // roster (needed for names/balances/chat). Admin and super admin can
+    // both add members. Only super admin can change roles or remove a
+    // member. Nobody can edit their own role.
     match /members/{uid} {
       allow read: if isMember();
       allow create: if isAdmin() || (isSignedIn() && request.auth.uid == uid && !exists(/databases/$(database)/documents/members/$(uid)));
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow update: if (isSuperAdmin() && request.auth.uid != uid)
+        || (
+          // Self-heal path: the super admin's own account correcting a
+          // pre-existing doc's role to super_admin on login. Scoped so it
+          // can only touch this exact uid's own role field and only set
+          // it to super_admin - it can't be used to change anything else.
+          isSuperAdminEmail()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+          && request.resource.data.role == 'super_admin'
+        );
+      allow delete: if isSuperAdmin() && request.auth.uid != uid;
     }
 
     // Expenses - any member can create. Individual expenses are auto-approved
-    // by the client and can't be escalated to group after creation. Only the
-    // admin can change status (approve/reject a pending group expense).
+    // by the client and can't be escalated to group after creation. Admin
+    // and super admin can both approve/reject a pending group expense.
+    // Only super admin can delete an expense.
     match /expenses/{expenseId} {
       allow read: if isMember();
       allow create: if isMember()
@@ -38,32 +66,38 @@ service cloud.firestore {
         && (request.resource.data.type == 'individual' ? request.resource.data.status == 'approved' : request.resource.data.status == 'pending');
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
-    // Planner - everyone can read, only admin can write.
+    // Planner - everyone can read. Admin and super admin can both add
+    // items. Only super admin can delete or edit an existing item.
     match /planner/{itemId} {
       allow read: if isMember();
-      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
     }
 
-    // Media metadata - all members can read and add. No edits; only the
-    // uploader or admin can delete their own entry.
+    // Media metadata - all members can read and add. No edits. Only super
+    // admin can delete any entry (uploaders can no longer delete their own -
+    // deletion is a super-admin-only action across the app).
     match /media/{mediaId} {
       allow read: if isMember();
       allow create: if isMember() && request.resource.data.uploadedByUid == request.auth.uid;
-      allow delete: if isAdmin() || (isMember() && resource.data.uploadedByUid == request.auth.uid);
+      allow delete: if isSuperAdmin();
       allow update: if false;
     }
 
     // Chat - group thread readable/writable by any member. DM threads only
-    // by the two participants (thread id is their sorted uid pair).
+    // by the two participants (thread id is their sorted uid pair). Only
+    // super admin can delete a message.
     match /chats/{threadId}/messages/{messageId} {
       allow read: if isMember() && (threadId == 'group' || threadId.split('_').hasAny([request.auth.uid]));
       allow create: if isMember()
         && request.resource.data.senderUid == request.auth.uid
         && (threadId == 'group' || threadId.split('_').hasAny([request.auth.uid]));
-      allow update, delete: if false;
+      allow delete: if isSuperAdmin();
+      allow update: if false;
     }
   }
 }

@@ -1,5 +1,11 @@
 // admin.js
-// Admin-only actions: add members, promote members to admin, view roster.
+// Add members, promote members to admin, view roster.
+//
+// Roles: super_admin > admin > member.
+//   - admin and super_admin can both add members, approve/reject expenses,
+//     and add planner items.
+//   - Only super_admin can delete anything (members, expenses, planner
+//     items, media, chat messages) or promote a member to admin.
 //
 // Creating a new Firebase Auth user client-side normally signs you in AS
 // that new user, which would log the admin out of their own session. This
@@ -9,6 +15,7 @@
 // Functions, no Blaze upgrade needed).
 
 import { app as primaryApp, db, ADMIN_EMAIL } from "./firebase-config.js";
+import { isSuperAdmin, currentUser } from "./auth.js";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth,
@@ -20,10 +27,17 @@ import {
   doc,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   query,
   orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const ROLE_LABEL = {
+  super_admin: "super admin",
+  admin: "admin",
+  member: "member"
+};
 
 export function renderAdminTab(container) {
   container.innerHTML = [
@@ -41,7 +55,7 @@ export function renderAdminTab(container) {
     '</div>',
     '<div class="section-title">Trip members</div>',
     '<div class="card" id="admin-member-list">',
-    '  <div class="empty-state"><i class="ti ti-users"></i>Loading members...</div>',
+    '  <div class="empty-state"><i class="bi bi-people"></i>Loading members...</div>',
     '</div>'
   ].join("\n");
 
@@ -52,7 +66,7 @@ export function renderAdminTab(container) {
 
   onSnapshot(q, function (snap) {
     if (snap.empty) {
-      listEl.innerHTML = '<div class="empty-state"><i class="ti ti-users"></i>No members yet.</div>';
+      listEl.innerHTML = '<div class="empty-state"><i class="bi bi-people"></i>No members yet.</div>';
       return;
     }
 
@@ -65,10 +79,19 @@ export function renderAdminTab(container) {
       row.className = "row";
       row.style.padding = "8px 0";
 
-      const rolePillClass = m.role === "admin" ? "pill-approved" : "pill-individual";
-      const promoteButton = m.role !== "admin"
-        ? '<button class="btn-ghost small" data-promote="' + uid + '">Make admin</button>'
-        : "";
+      const rolePillClass = m.role === "super_admin" || m.role === "admin" ? "pill-approved" : "pill-individual";
+      const roleLabel = ROLE_LABEL[m.role] || m.role;
+
+      // Only super admin sees promote/delete controls, and never on itself.
+      const isSelf = uid === currentUser?.uid;
+      let controls = "";
+      if (isSuperAdmin() && !isSelf) {
+        const promoteButton = m.role === "member"
+          ? '<button class="btn-ghost small" data-promote="' + uid + '">Make admin</button>'
+          : "";
+        const deleteButton = '<button class="btn-danger" data-delete="' + uid + '"><i class="bi bi-trash"></i></button>';
+        controls = promoteButton + " " + deleteButton;
+      }
 
       row.innerHTML = [
         '<div>',
@@ -76,26 +99,30 @@ export function renderAdminTab(container) {
         '  <div style="font-size:12px; color:var(--text-muted);">' + escapeHtml(m.email) + '</div>',
         '</div>',
         '<div style="display:flex; align-items:center; gap:8px;">',
-        '  <span class="pill ' + rolePillClass + '">' + m.role + '</span>',
-        '  ' + promoteButton,
+        '  <span class="pill ' + rolePillClass + '">' + roleLabel + '</span>',
+        '  ' + controls,
         '</div>'
       ].join("\n");
 
       listEl.appendChild(row);
     });
 
-    const promoteButtons = listEl.querySelectorAll("[data-promote]");
-    for (let i = 0; i < promoteButtons.length; i++) {
-      const btn = promoteButtons[i];
+    listEl.querySelectorAll("[data-promote]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         handlePromote(btn.getAttribute("data-promote"), btn);
       });
-    }
+    });
+
+    listEl.querySelectorAll("[data-delete]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        handleDeleteMember(btn.getAttribute("data-delete"), btn);
+      });
+    });
   });
 }
 
 async function handlePromote(uid, btnEl) {
-  const confirmed = confirm("Make this member an admin? They'll be able to add members, approve expenses, and edit the planner - same as you.");
+  const confirmed = confirm("Make this member an admin? They'll be able to add members, approve expenses, and add planner items - but won't be able to delete anything.");
   if (!confirmed) return;
 
   btnEl.disabled = true;
@@ -107,6 +134,20 @@ async function handlePromote(uid, btnEl) {
     alert("Couldn't update: " + err.message);
     btnEl.disabled = false;
     btnEl.textContent = "Make admin";
+  }
+}
+
+async function handleDeleteMember(uid, btnEl) {
+  const confirmed = confirm("Remove this member from the trip? This only removes their profile/roster entry, not their past expenses, chat messages, or media.");
+  if (!confirmed) return;
+
+  btnEl.disabled = true;
+
+  try {
+    await deleteDoc(doc(db, "members", uid));
+  } catch (err) {
+    alert("Couldn't remove member: " + err.message);
+    btnEl.disabled = false;
   }
 }
 
