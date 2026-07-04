@@ -1,9 +1,9 @@
 // media.js
-// All members and admin can upload and download photos/videos. Files go
-// to Firebase Storage; metadata (url, uploader, type, timestamp) goes to
-// Firestore for the live-updating grid.
+// All members and admin can upload and download photos/videos. Files are
+// uploaded directly to Cloudinary's free tier (no Firebase Storage / Blaze
+// plan needed); only the resulting URL + metadata is saved to Firestore.
 
-import { db, storage } from "./firebase-config.js";
+import { db, CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "./firebase-config.js";
 import { currentUser, currentProfile } from "./auth.js";
 import {
   collection,
@@ -12,11 +12,6 @@ import {
   query,
   orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 let unsubMedia = null;
 
@@ -69,28 +64,30 @@ async function handleFiles(fileList) {
   const files = Array.from(fileList);
   if (files.length === 0) return;
 
+  if (CLOUDINARY_CLOUD_NAME === "YOUR_CLOUD_NAME") {
+    statusEl.textContent = "Media upload isn't configured yet - add your Cloudinary details to firebase-config.js.";
+    return;
+  }
+
   for (const file of files) {
-    statusEl.textContent = `Uploading ${file.name}…`;
+    statusEl.textContent = `Uploading ${file.name}...`;
     try {
-      const path = `trip-media/${currentUser.uid}/${Date.now()}-${file.name}`;
-      const storageRef = ref(storage, path);
-      const task = uploadBytesResumable(storageRef, file);
+      const isVideo = file.type.startsWith("video");
+      const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${isVideo ? "video" : "image"}/upload`;
 
-      await new Promise((resolve, reject) => {
-        task.on(
-          "state_changed",
-          (snapshot) => {
-            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-            statusEl.textContent = `Uploading ${file.name}… ${pct}%`;
-          },
-          reject,
-          resolve
-        );
-      });
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
 
-      const url = await getDownloadURL(storageRef);
+      const res = await fetch(endpoint, { method: "POST", body: formData });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error?.message || "Upload failed.");
+      }
+      const data = await res.json();
+
       await addDoc(collection(db, "media"), {
-        url,
+        url: data.secure_url,
         fileType: file.type,
         uploadedByUid: currentUser.uid,
         uploadedByName: currentProfile.name,

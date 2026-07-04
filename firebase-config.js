@@ -24,9 +24,11 @@ import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-
   };
 
 // The one and only admin for this trip.
-export const ADMIN_EMAIL = "sathwikreddy9347@gmail.com";
+export const ADMIN_EMAIL = "kothakulasagar2002@gmail.com";
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const CLOUDINARY_CLOUD_NAME = "hazf1hmf";
+export const CLOUDINARY_UPLOAD_PRESET = "munnar_trip";
