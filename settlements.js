@@ -10,6 +10,7 @@ import { renderAvatar } from "./avatar.js";
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
@@ -98,7 +99,7 @@ function render() {
     return;
   }
 
-  const { creditItems, debitItems } = buildRelationshipItems();
+  const { creditItems, debitItems, paymentRequests, paymentHistory } = buildRelationshipItems();
   const totalOwedToMe = creditItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const totalIOwe = debitItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
@@ -143,12 +144,8 @@ function render() {
               <div class="settlement-amount">₹${formatCurrency(item.amount)}</div>
             </div>
             <div class="settlement-actions">
-              <button class="btn-ghost small" data-whatsapp="${item.counterpartUid}">WhatsApp</button>
-              <button class="btn-ghost small" data-notify="${item.counterpartUid}">Notify</button>
-              ${item.status === SETTLEMENT_STATUSES.WAITING_RECEIVER_APPROVAL ? `
-                <button class="btn-primary small" data-approve="${item.paymentId}">Approve</button>
-                <button class="btn-ghost small" data-reject="${item.paymentId}">Reject</button>
-              ` : ""}
+              <button class="btn-ghost small" data-whatsapp="${item.counterpartUid}" data-amount="${item.amount}">WhatsApp</button>
+              <button class="btn-ghost small" data-notify="${item.counterpartUid}" data-amount="${item.amount}">Notify</button>
               <button class="btn-ghost small" data-history="${item.key}">History</button>
             </div>
           </div>
@@ -182,14 +179,61 @@ function render() {
         `).join("") : '<div class="empty-state">You do not currently owe anyone.</div>'}
       </div>
     </div>
+
+    <div class="settlement-section">
+      <div class="settlement-section-header">
+        <h4>Payment Requests</h4>
+        <span class="pill pill-pending">${paymentRequests.length} pending</span>
+      </div>
+      <div class="settlement-list">
+        ${paymentRequests.length ? paymentRequests.map((item) => `
+          <div class="settlement-item">
+            <div class="settlement-item-top">
+              <div>
+                <div class="settlement-member-name">${escapeHtml(item.debtorName)}</div>
+                <div class="settlement-member-meta">${escapeHtml(item.status)} · ${escapeHtml(item.note || "No note")}</div>
+              </div>
+              <div class="settlement-amount">₹${formatCurrency(item.amount)}</div>
+            </div>
+            <div class="settlement-actions">
+              <button class="btn-primary small" data-approve="${item.id}">Approve</button>
+              <button class="btn-ghost small" data-reject="${item.id}">Reject</button>
+            </div>
+          </div>
+        `).join("") : '<div class="empty-state">No payment requests are waiting for your action.</div>'}
+      </div>
+    </div>
+
+    <div class="settlement-section">
+      <div class="settlement-section-header">
+        <h4>Payment History</h4>
+        <span class="pill pill-approved">${paymentHistory.length} entries</span>
+      </div>
+      <div class="settlement-list">
+        ${paymentHistory.length ? paymentHistory.map((item) => `
+          <div class="settlement-item">
+            <div class="settlement-item-top">
+              <div>
+                <div class="settlement-member-name">${escapeHtml(item.counterpartName)}</div>
+                <div class="settlement-member-meta">${escapeHtml(item.status)} · ${escapeHtml(item.reference || "No reference")}</div>
+              </div>
+              <div class="settlement-amount">₹${formatCurrency(item.amount)}</div>
+            </div>
+            <div class="settlement-actions">
+              <button class="btn-ghost small" data-delete-payment="${item.id}">Delete</button>
+            </div>
+          </div>
+        `).join("") : '<div class="empty-state">No payment history yet.</div>'}
+      </div>
+    </div>
   `;
 
   contentEl.querySelectorAll("[data-whatsapp]").forEach((button) => {
-    button.addEventListener("click", () => openWhatsApp(button.dataset.whatsapp));
+    button.addEventListener("click", () => openWhatsApp(button.dataset.whatsapp, button.dataset.amount));
   });
 
   contentEl.querySelectorAll("[data-notify]").forEach((button) => {
-    button.addEventListener("click", () => notifyMember(button.dataset.notify));
+    button.addEventListener("click", () => notifyMember(button.dataset.notify, button.dataset.amount));
   });
 
   contentEl.querySelectorAll("[data-pay]").forEach((button) => {
@@ -207,6 +251,25 @@ function render() {
   contentEl.querySelectorAll("[data-reject]").forEach((button) => {
     button.addEventListener("click", () => rejectPayment(button.dataset.reject));
   });
+
+  contentEl.querySelectorAll("[data-delete-payment]").forEach((button) => {
+    button.addEventListener("click", () => deletePaymentEntry(button.dataset.deletePayment));
+  });
+}
+
+function getExpenseParticipants(expense) {
+  if (Array.isArray(expense.participants) && expense.participants.length > 0) {
+    return expense.participants.map((participant) => ({
+      memberId: participant.memberId || participant.uid || participant.userId,
+      shareAmount: Number(participant.shareAmount || 0)
+    })).filter((participant) => participant.memberId);
+  }
+
+  const fallbackMembers = Array.isArray(expense.splitAmong) && expense.splitAmong.length > 0
+    ? expense.splitAmong
+    : allMembers.map((member) => member.uid);
+  const fallbackShare = Number(expense.amount || 0) / Math.max(fallbackMembers.length, 1);
+  return fallbackMembers.map((memberId) => ({ memberId, shareAmount: fallbackShare }));
 }
 
 function buildRelationshipItems() {
@@ -233,25 +296,23 @@ function buildRelationshipItems() {
   approvedExpenses.forEach((expense) => {
     if (expense.type !== "group") return;
 
-    const participants = Array.isArray(expense.splitAmong) && expense.splitAmong.length > 0
-      ? expense.splitAmong
-      : allMembers.map((member) => member.uid);
-
-    if (!participants.includes(currentUserUid)) return;
-
-    const shareAmount = Number(expense.amount || 0) / Math.max(participants.length, 1);
+    const participants = getExpenseParticipants(expense);
+    if (!participants.some((participant) => participant.memberId === currentUserUid)) return;
 
     if (expense.paidByUid === currentUserUid) {
-      participants.forEach((participantUid) => {
-        if (participantUid !== currentUserUid) {
-          addRelationship(participantUid, currentUserUid, shareAmount);
+      participants.forEach((participant) => {
+        if (participant.memberId !== currentUserUid) {
+          addRelationship(participant.memberId, currentUserUid, Number(participant.shareAmount || 0));
         }
       });
       return;
     }
 
     if (expense.paidByUid && expense.paidByUid !== currentUserUid) {
-      addRelationship(currentUserUid, expense.paidByUid, shareAmount);
+      const currentUserShare = participants.find((participant) => participant.memberId === currentUserUid);
+      if (currentUserShare) {
+        addRelationship(currentUserUid, expense.paidByUid, Number(currentUserShare.shareAmount || 0));
+      }
     }
   });
 
@@ -292,7 +353,28 @@ function buildRelationshipItems() {
     }
   });
 
-  return { creditItems, debitItems };
+  const paymentRequests = allPayments
+    .filter((payment) => payment.creditorUid === currentUserUid && [SETTLEMENT_STATUSES.PENDING, SETTLEMENT_STATUSES.WAITING_RECEIVER_APPROVAL, SETTLEMENT_STATUSES.PAYMENT_RECORDED].includes(payment.status))
+    .map((payment) => ({
+      id: payment.id,
+      debtorName: allMembers.find((member) => member.uid === payment.debtorUid)?.name || "Member",
+      amount: Number(payment.amount || 0),
+      status: payment.status || SETTLEMENT_STATUSES.PENDING,
+      note: payment.note || ""
+    }));
+
+  const paymentHistory = allPayments
+    .filter((payment) => payment.debtorUid === currentUserUid || payment.creditorUid === currentUserUid)
+    .map((payment) => ({
+      id: payment.id,
+      amount: Number(payment.amount || 0),
+      status: payment.status || SETTLEMENT_STATUSES.PENDING,
+      reference: payment.reference || payment.paymentMethod || "",
+      counterpartName: allMembers.find((member) => member.uid === (payment.creditorUid === currentUserUid ? payment.debtorUid : payment.creditorUid))?.name || "Member"
+    }))
+    .sort((a, b) => getTimestampValue(b.createdAt) - getTimestampValue(a.createdAt));
+
+  return { creditItems, debitItems, paymentRequests, paymentHistory };
 }
 
 function getTimestampValue(value) {
@@ -302,24 +384,40 @@ function getTimestampValue(value) {
   return Number(value) || 0;
 }
 
-function openWhatsApp(memberUid) {
+function openWhatsApp(memberUid, amount = 0) {
   const member = allMembers.find((entry) => entry.uid === memberUid);
   const tripName = document.getElementById("header-title")?.textContent || "Munner Trip";
+  const number = member?.whatsappNumber || member?.mobileNumber || "";
+  if (!number) {
+    alert("WhatsApp Number Not Available");
+    return;
+  }
+
   const message = [
     `Hi ${member?.name || "there"},`,
     "",
-    `This is a friendly reminder regarding our ${tripName} trip.`,
+    `This is a friendly reminder regarding our "${tripName}" trip.`,
     "",
-    "Thank you!"
+    `I paid ₹${formatCurrency(amount)} for the group.`,
+    "Your share is pending.",
+    "Please send it whenever possible.",
+    "Thank you 😊"
   ].join("\n");
-  const whatsAppUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+  const whatsAppUrl = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
   window.open(whatsAppUrl, "_blank", "noopener,noreferrer");
 }
 
-async function notifyMember(memberUid) {
+async function notifyMember(memberUid, amount = 0) {
   const member = allMembers.find((entry) => entry.uid === memberUid);
-  const title = "Settlement reminder";
-  const message = `${currentProfile?.name || "Admin"} sent you a settlement reminder.`;
+  const lastSent = Number(localStorage.getItem(`munner-reminder-${memberUid}`) || 0);
+  const now = Date.now();
+  if (now - lastSent < 30 * 60 * 1000) {
+    alert("A reminder was already sent recently. Please wait a little before sending another.");
+    return;
+  }
+
+  const title = "Payment Reminder";
+  const message = `${member?.name || "Member"}\nYour payment of ₹${formatCurrency(amount)} is pending.`;
 
   await NotificationService.send({
     type: NOTIFICATION_TYPES.PAYMENT_ADDED,
@@ -335,6 +433,8 @@ async function notifyMember(memberUid) {
     targetId: memberUid,
     sound: "planner"
   });
+
+  localStorage.setItem(`munner-reminder-${memberUid}`, now.toString());
 
   await addActivityEntry({
     title: "Settlement reminder sent",
@@ -352,13 +452,21 @@ function openPaymentModal(creditorUid) {
   overlay.className = "modal-overlay";
   overlay.innerHTML = `
     <div class="modal-sheet">
-      <h3>Record payment</h3>
+      <h3>Submit payment</h3>
       <p class="hint" style="text-align:left; margin-top:-4px;">${escapeHtml(creditor?.name || "Member")}</p>
       <input id="settlement-amount" type="number" min="0" step="0.01" placeholder="Amount" />
-      <textarea id="settlement-note" rows="3" placeholder="Payment note"></textarea>
+      <select id="settlement-method">
+        <option value="UPI">UPI</option>
+        <option value="Cash">Cash</option>
+        <option value="Bank">Bank</option>
+        <option value="Card">Card</option>
+        <option value="Other">Other</option>
+      </select>
+      <input id="settlement-reference" type="text" placeholder="Reference" />
+      <textarea id="settlement-note" rows="3" placeholder="Notes"></textarea>
       <div class="modal-actions">
         <button class="btn-ghost" id="settlement-cancel">Cancel</button>
-        <button class="btn-primary" id="settlement-submit">Send Request</button>
+        <button class="btn-primary" id="settlement-submit">Submit</button>
       </div>
     </div>
   `;
@@ -371,6 +479,8 @@ function openPaymentModal(creditorUid) {
 
   overlay.querySelector("#settlement-submit").addEventListener("click", async () => {
     const amount = Number(overlay.querySelector("#settlement-amount").value);
+    const paymentMethod = overlay.querySelector("#settlement-method").value;
+    const reference = overlay.querySelector("#settlement-reference").value.trim();
     const note = overlay.querySelector("#settlement-note").value.trim();
     if (!amount || amount <= 0) {
       alert("Enter a valid payment amount.");
@@ -381,6 +491,8 @@ function openPaymentModal(creditorUid) {
       debtorUid: currentUser.uid,
       creditorUid,
       amount,
+      paymentMethod,
+      reference,
       note
     });
 
@@ -388,13 +500,15 @@ function openPaymentModal(creditorUid) {
   });
 }
 
-async function createPaymentTransaction({ debtorUid, creditorUid, amount, note }) {
+async function createPaymentTransaction({ debtorUid, creditorUid, amount, paymentMethod, reference, note }) {
   const creditor = allMembers.find((member) => member.uid === creditorUid);
   const paymentDoc = await addDoc(collection(db, COLLECTIONS.PAYMENTS), {
     debtorUid,
     creditorUid,
     amount,
     status: SETTLEMENT_STATUSES.WAITING_RECEIVER_APPROVAL,
+    paymentMethod,
+    reference,
     note,
     recordedByUid: currentUser?.uid,
     recordedByName: currentProfile?.name || "You",
@@ -519,6 +633,25 @@ async function rejectPayment(paymentId) {
     title: "Payment rejected",
     message: `${currentProfile?.name || "You"} rejected a settlement payment request.`,
     type: "payment_rejected",
+    targetType: "settlements",
+    targetId: paymentId,
+    entryType: "activity"
+  });
+}
+
+async function deletePaymentEntry(paymentId) {
+  const payment = allPayments.find((entry) => entry.id === paymentId);
+  if (!payment) return;
+
+  const confirmed = window.confirm("Delete this payment history entry?");
+  if (!confirmed) return;
+
+  await deleteDoc(doc(db, COLLECTIONS.PAYMENTS, paymentId));
+
+  await addActivityEntry({
+    title: "Payment entry deleted",
+    message: `${currentProfile?.name || "You"} removed a settlement payment entry.`,
+    type: "payment_deleted",
     targetType: "settlements",
     targetId: paymentId,
     entryType: "activity"

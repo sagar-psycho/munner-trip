@@ -11,7 +11,8 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   sendPasswordResetEmail,
-  signOut
+  signOut,
+  updatePassword
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   collection,
@@ -48,9 +49,8 @@ export function renderAdminTab(container) {
           <input id="admin-name" type="text" placeholder="Full name" />
           <input id="admin-email" type="email" placeholder="Email address" />
           <input id="admin-password" type="text" placeholder="Temporary password" />
-          <input id="admin-mobile" type="tel" placeholder="Mobile number" />
-          <input id="admin-country" type="text" placeholder="Country code" value="+91" />
-          <input id="admin-emergency" type="text" placeholder="Emergency contact" />
+          <input id="admin-country" type="text" value="+91" placeholder="Country code" />
+          <input id="admin-whatsapp" type="tel" placeholder="WhatsApp number (e.g. 919845678901)" />
           <select id="admin-role">
             <option value="member">Member</option>
             <option value="admin">Admin</option>
@@ -59,7 +59,7 @@ export function renderAdminTab(container) {
         </div>
         <button id="admin-add-btn" class="btn-primary">Add member</button>
         <p id="admin-add-error" class="error-text"></p>
-        <p class="hint" style="text-align:left; margin-top:10px;">The member signs in with this email and password on the login screen.</p>
+        <p class="hint" style="text-align:left; margin-top:10px;">The member signs in with this email and password on the login screen. Password is required when creating a new account.</p>
       </div>
 
       <div class="admin-card">
@@ -90,7 +90,7 @@ export function renderAdminTab(container) {
             <th>Avatar</th>
             <th>Name</th>
             <th>Email</th>
-            <th>Mobile</th>
+            <th>WhatsApp</th>
             <th>Role</th>
             <th>Status</th>
             <th>Joined</th>
@@ -116,7 +116,7 @@ export function renderAdminTab(container) {
           <div class="admin-member-meta">${escapeHtml(member.email || "")}</div>
         </td>
         <td>${escapeHtml(member.email || "")}</td>
-        <td>${escapeHtml(member.mobileNumber || "-")}</td>
+        <td>${escapeHtml(member.whatsappNumber || member.mobileNumber || "-")}</td>
         <td><span class="pill ${member.role === "super_admin" ? "pill-approved" : member.role === "admin" ? "pill-pending" : "pill-individual"}">${escapeHtml(ROLE_LABEL[member.role] || member.role)}</span></td>
         <td>${escapeHtml(STATUS_LABEL[member.status] || "Active")}</td>
         <td>${formatDate(member.addedAt || member.createdAt)}</td>
@@ -159,21 +159,24 @@ async function handleAddMember() {
   const name = document.getElementById("admin-name").value.trim();
   const email = document.getElementById("admin-email").value.trim();
   const password = document.getElementById("admin-password").value;
-  const mobile = document.getElementById("admin-mobile").value.trim();
+  const whatsapp = document.getElementById("admin-whatsapp").value.trim();
   const countryCode = document.getElementById("admin-country").value.trim();
-  const emergencyContact = document.getElementById("admin-emergency").value.trim();
   const role = document.getElementById("admin-role")?.value || "member";
   const errorEl = document.getElementById("admin-add-error");
   errorEl.textContent = "";
 
-  if (!name || !email || !password || !mobile) {
-    errorEl.textContent = "Name, email, password, and mobile number are required.";
+  const validationError = validateMemberInput({ name, email, password, whatsapp, countryCode, role, requirePassword: true });
+  if (validationError) {
+    errorEl.textContent = validationError;
     return;
   }
-  if (password.length < 6) {
-    errorEl.textContent = "Password must be at least 6 characters.";
+
+  const normalizedWhatsApp = normalizeWhatsAppNumber(whatsapp, countryCode);
+  if (!normalizedWhatsApp) {
+    errorEl.textContent = "Enter a valid WhatsApp number with country code.";
     return;
   }
+
   if (!isSuperAdmin() && role === "super_admin") {
     errorEl.textContent = "Only super admins can create super admin accounts.";
     return;
@@ -192,14 +195,14 @@ async function handleAddMember() {
     await setDoc(doc(db, "members", cred.user.uid), {
       name,
       email,
-      mobileNumber: mobile,
+      whatsappNumber: normalizedWhatsApp,
       countryCode,
-      emergencyContact,
       role,
       status: "active",
       addedAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      createdBy: currentUser?.uid || null,
       updatedBy: currentUser?.uid || null
     });
 
@@ -221,9 +224,8 @@ async function handleAddMember() {
     document.getElementById("admin-name").value = "";
     document.getElementById("admin-email").value = "";
     document.getElementById("admin-password").value = "";
-    document.getElementById("admin-mobile").value = "";
+    document.getElementById("admin-whatsapp").value = "";
     document.getElementById("admin-country").value = "+91";
-    document.getElementById("admin-emergency").value = "";
     document.getElementById("admin-role").value = "member";
   } catch (err) {
     errorEl.textContent = friendlyError(err);
@@ -256,13 +258,56 @@ async function handleDeleteMember(uid) {
 async function handleResetPassword(uid) {
   const member = await getMemberById(uid);
   if (!member?.email) return;
-  try {
-    await sendPasswordResetEmail(getAuth(primaryApp), member.email);
-    alert("Reset password email sent.");
-  } catch (err) {
-    alert("Couldn't send reset email: " + err.message);
-  }
+  openResetPasswordModal(uid, member);
 }
+
+function openResetPasswordModal(uid, member) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <h3>Reset Password</h3>
+      <p class="hint" style="text-align:left; margin-top:-4px;">${escapeHtml(member?.name || "Member")}</p>
+      <input id="reset-password" type="password" placeholder="New password" />
+      <p id="reset-password-error" class="error-text"></p>
+      <p id="reset-password-success" class="hint" style="text-align:left;"></p>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="reset-cancel">Cancel</button>
+        <button class="btn-primary" id="reset-save">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#reset-cancel").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("#reset-save").addEventListener("click", async () => {
+    const newPassword = document.getElementById("reset-password").value;
+    const errorEl = document.getElementById("reset-password-error");
+    const successEl = document.getElementById("reset-password-success");
+    errorEl.textContent = "";
+    successEl.textContent = "";
+
+    if (!newPassword || newPassword.length < 6) {
+      errorEl.textContent = "Password must be at least 6 characters.";
+      return;
+    }
+
+    try {
+      const auth = getAuth(primaryApp);
+      if (uid === currentUser?.uid && auth.currentUser) {
+        await updatePassword(auth.currentUser, newPassword);
+        successEl.textContent = "Password updated successfully.";
+        return;
+      }
+
+      await sendPasswordResetEmail(getAuth(primaryApp), member.email);
+      successEl.textContent = "Password reset link sent to the member's email.";
+    } catch (err) {
+      errorEl.textContent = err.message || "Couldn't reset password.";
+    }
+  });
+}
+
 
 async function handleDeactivateMember(uid) {
   try {
@@ -289,11 +334,11 @@ async function showProfileModal(uid) {
         </div>
       </div>
       <div class="admin-detail-grid">
-        <div><strong>Mobile</strong><div>${escapeHtml(member.mobileNumber || "-")}</div></div>
+        <div><strong>WhatsApp</strong><div>${escapeHtml(member.whatsappNumber || member.mobileNumber || "-")}</div></div>
         <div><strong>Role</strong><div>${escapeHtml(ROLE_LABEL[member.role] || member.role)}</div></div>
         <div><strong>Joined</strong><div>${formatDate(member.addedAt || member.createdAt)}</div></div>
         <div><strong>Last Login</strong><div>${member.lastLoginAt ? formatDate(member.lastLoginAt) : "Not recorded"}</div></div>
-        <div><strong>Emergency Contact</strong><div>${escapeHtml(member.emergencyContact || "-")}</div></div>
+        <div><strong>Country Code</strong><div>${escapeHtml(member.countryCode || "-")}</div></div>
         <div><strong>Status</strong><div>${escapeHtml(STATUS_LABEL[member.status] || "Active")}</div></div>
       </div>
       <div class="modal-actions">
@@ -363,7 +408,14 @@ function openEditMemberModal(uid) {
       <h3>Edit Member</h3>
       <input id="edit-name" type="text" placeholder="Name" />
       <input id="edit-email" type="email" placeholder="Email" />
-      <input id="edit-mobile" type="tel" placeholder="Mobile number" />
+      <input id="edit-country" type="text" placeholder="Country code" />
+      <input id="edit-whatsapp" type="tel" placeholder="WhatsApp number" />
+      <select id="edit-role">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+        ${isSuperAdmin() ? '<option value="super_admin">Super Admin</option>' : ""}
+      </select>
+      <p class="hint" style="text-align:left; margin-top:8px;">Password stays unchanged unless you use Reset Password.</p>
       <div class="modal-actions">
         <button class="btn-ghost" id="edit-cancel">Cancel</button>
         <button class="btn-primary" id="edit-save">Save</button>
@@ -375,20 +427,47 @@ function openEditMemberModal(uid) {
   getMemberById(uid).then((member) => {
     document.getElementById("edit-name").value = member?.name || "";
     document.getElementById("edit-email").value = member?.email || "";
-    document.getElementById("edit-mobile").value = member?.mobileNumber || "";
+    document.getElementById("edit-country").value = member?.countryCode || "+91";
+    document.getElementById("edit-whatsapp").value = member?.whatsappNumber || "";
+    document.getElementById("edit-role").value = member?.role || "member";
   });
 
   overlay.querySelector("#edit-cancel").addEventListener("click", () => overlay.remove());
   overlay.querySelector("#edit-save").addEventListener("click", async () => {
     const name = document.getElementById("edit-name").value.trim();
     const email = document.getElementById("edit-email").value.trim();
-    const mobile = document.getElementById("edit-mobile").value.trim();
+    const countryCode = document.getElementById("edit-country").value.trim();
+    const whatsapp = document.getElementById("edit-whatsapp").value.trim();
+    const role = document.getElementById("edit-role").value;
+
+    const validationError = validateMemberInput({ name, email, whatsapp, countryCode, role, requirePassword: false });
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
 
     try {
+      const existingMember = await getMemberById(uid);
+      const normalizedWhatsApp = normalizeWhatsAppNumber(whatsapp, countryCode);
+      if (!normalizedWhatsApp) {
+        alert("Enter a valid WhatsApp number with country code.");
+        return;
+      }
+      if (!isSuperAdmin() && role === "super_admin") {
+        alert("Only super admins can assign super admin.");
+        return;
+      }
+      if (!isSuperAdmin() && existingMember?.role === "super_admin" && role !== "super_admin") {
+        alert("Only super admins can remove super admin privileges.");
+        return;
+      }
+
       const payload = {
         name,
         email,
-        mobileNumber: mobile,
+        whatsappNumber: normalizedWhatsApp,
+        countryCode,
+        role,
         updatedAt: Date.now(),
         updatedBy: currentUser?.uid || null
       };
@@ -420,6 +499,36 @@ function friendlyError(err) {
   if (err.code === "auth/invalid-email") return "That doesn't look like a valid email.";
   if (err.code === "auth/weak-password") return "Password is too weak - use at least 6 characters.";
   return err.message;
+}
+
+function validateMemberInput({ name, email, password, whatsapp, countryCode, role, requirePassword = false }) {
+  if (!name || !email || !whatsapp || !countryCode) {
+    return "Name, email, WhatsApp number, and country code are required.";
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return "Enter a valid email address.";
+  }
+  if (requirePassword && (!password || password.length < 6)) {
+    return "Password must be at least 6 characters.";
+  }
+  if (!requirePassword && password !== undefined && password !== null && password !== "" && password.length < 6) {
+    return "Password must be at least 6 characters.";
+  }
+  if (!/^\+?\d{1,4}$/.test(countryCode.replace(/\s+/g, ""))) {
+    return "Country code should be a short numeric prefix such as +91.";
+  }
+  if (!/^\d{8,15}$/.test(whatsapp.replace(/\D/g, ""))) {
+    return "WhatsApp number must contain only digits and be at least 8 digits long.";
+  }
+  if (role && !["member", "admin", "super_admin"].includes(role)) {
+    return "Select a valid role.";
+  }
+  return "";
+}
+
+function normalizeWhatsAppNumber(value, countryCode) {
+  const digits = `${countryCode || ""}${value || ""}`.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15 ? digits : "";
 }
 
 function formatDate(value) {
