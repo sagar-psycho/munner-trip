@@ -35,13 +35,16 @@ service cloud.firestore {
     }
 
     // Member profiles - anyone signed in and already a member can read the
-    // roster (needed for names/balances/chat). Admin and super admin can
-    // both add members. Only super admin can change roles or remove a
-    // member. Nobody can edit their own role.
+    // roster (needed for names/balances/chat). Members can edit their own
+    // profile fields, admins can manage other member profiles, and only the
+    // super admin can change roles or remove a member.
     match /members/{uid} {
       allow read: if isMember();
       allow create: if isAdmin() || (isSignedIn() && request.auth.uid == uid && !exists(/databases/$(database)/documents/members/$(uid)));
-      allow update: if (isSuperAdmin() && request.auth.uid != uid)
+      allow update: if (
+        (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','email','whatsappNumber','upiId','profilePhotoUrl','qrCodeUrl','updatedAt','lastLoginAt','updatedBy']))
+        || (isAdmin() && request.auth.uid != uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','email','whatsappNumber','upiId','profilePhotoUrl','qrCodeUrl','updatedAt','updatedBy']))
+        || (isSuperAdmin() && request.auth.uid != uid)
         || (
           // Self-heal path: the super admin's own account correcting a
           // pre-existing doc's role to super_admin on login. Scoped so it
@@ -51,7 +54,8 @@ service cloud.firestore {
           && request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
           && request.resource.data.role == 'super_admin'
-        );
+        )
+      );
       allow delete: if isSuperAdmin() && request.auth.uid != uid;
     }
 
@@ -144,14 +148,39 @@ service cloud.firestore {
         && request.resource.data.creditorUid is string
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
-        && request.resource.data.status is string;
+        && request.resource.data.status is string
+        && request.resource.data.debtorUid == request.auth.uid;
       allow update: if isMember()
         && (
-          request.auth.uid == resource.data.debtorUid
-          || request.auth.uid == resource.data.creditorUid
+          (request.auth.uid == resource.data.debtorUid && request.resource.data.debtorUid == resource.data.debtorUid)
+          || (request.auth.uid == resource.data.creditorUid && request.resource.data.creditorUid == resource.data.creditorUid)
           || request.auth.uid == resource.data.recordedByUid
           || isAdmin()
         );
+      allow delete: if false;
+    }
+
+    match /paymentRequests/{requestId} {
+      allow read: if isMember()
+        && (
+          request.auth.uid == resource.data.debtorUid
+          || request.auth.uid == resource.data.creditorUid
+          || isAdmin()
+        );
+      allow create: if isMember() && request.resource.data.debtorUid == request.auth.uid;
+      allow update: if isMember()
+        && (
+          request.auth.uid == resource.data.creditorUid
+          || request.auth.uid == resource.data.debtorUid
+          || isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /settlementHistory/{entryId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow update: if isMember() && request.auth.uid == resource.data.actorUid;
       allow delete: if false;
     }
 

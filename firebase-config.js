@@ -60,7 +60,11 @@ export const COLLECTIONS = {
   NOTIFICATION_TOKENS: "notificationTokens",
   SETTINGS: "settings",
   PAYMENTS: "payments",
-  ACTIVITY_LOGS: "activity_logs"
+  PAYMENT_REQUESTS: "paymentRequests",
+  SETTLEMENT_HISTORY: "settlementHistory",
+  ACTIVITY_LOGS: "activity_logs",
+  TRIP_SETTINGS: "tripSettings",
+  POLLS: "polls"
 };
 
 /* ==========================================================

@@ -7,6 +7,7 @@ import { renderChatTab, teardownChatTab } from "./chat.js";
 import { renderAdminTab } from "./admin.js";
 import { renderNotificationCenter } from "./notification-center.js";
 import { renderSettlementTab, teardownSettlementTab } from "./settlements.js";
+import { renderDashboardTab, teardownDashboardTab } from "./dashboard.js";
 import { requestBrowserNotificationPermission, NotificationService } from "./notification-service.js";
 
 const screenLogin = document.getElementById("screen-login");
@@ -17,6 +18,7 @@ const userNameEl = document.getElementById("user-name");
 const tabAdminBtn = document.getElementById("tab-admin");
 
 const tabConfig = {
+  dashboard: { title: "Dashboard", render: renderDashboardTab, teardown: teardownDashboardTab },
   expenses: { title: "Expenses", render: renderExpensesTab, teardown: teardownExpensesTab },
   planner: { title: "Planner", render: renderPlannerTab, teardown: teardownPlannerTab },
   media: { title: "Media", render: renderMediaTab, teardown: teardownMediaTab },
@@ -26,7 +28,7 @@ const tabConfig = {
   settlements: { title: "Settlements", render: renderSettlementTab, teardown: teardownSettlementTab }
 };
 
-let activeTab = "expenses";
+let activeTab = "dashboard";
 let unreadSubscription = null;
 
 function teardownAll() {
@@ -102,6 +104,6 @@ onAuthReady((user, profile, errorMessage) => {
       badgeEl.style.display = count > 0 ? "inline-flex" : "none";
     }
   });
-  const initialTab = window.location.hash.replace(/^#/, "") || "expenses";
-  switchTab(tabConfig[initialTab] ? initialTab : "expenses");
+  const initialTab = window.location.hash.replace(/^#/, "") || "dashboard";
+  switchTab(tabConfig[initialTab] ? initialTab : "dashboard");
 });
